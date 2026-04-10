@@ -69,6 +69,7 @@ class TRPOAgent:
             target = rewards[i] + self.gamma * next_v * (1 - done)
 
             td = target - v
+            td = np.clip(td, -1, 1)
 
             dw2 = np.outer(h_v, [td])
             db2 = np.array([td])
@@ -149,7 +150,7 @@ class TRPOAgent:
     def fisher_vector_product(self, states, old_probs, v):
 
         eps = 1e-4
-        damping = 1e-3
+        damping = 1e-1
 
         params = self.net.get_params()
 
@@ -206,7 +207,9 @@ class TRPOAgent:
         shs = 0.5 * np.dot(step_dir, Avp(step_dir))
 
         if shs <= 0:
-            return
+                print("[WARN] bad curvature, using fallback")
+                step_dir = g
+                shs = np.dot(g, g)
 
         step = step_dir / (np.sqrt(shs / self.delta) + 1e-8)
 

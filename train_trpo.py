@@ -53,7 +53,7 @@ for ep in range(Config.EPISODES):
         print('============================================')
         print(f"[TRPO] Episode {ep}, Reward: {total_reward}")
         print(f"KL Divergence: {KL}")
-        print('============================================')
+        # print('============================================')
         
 
     if ep % 100 == 0:
