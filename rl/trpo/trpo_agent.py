@@ -5,7 +5,6 @@ from rl.trpo.cg_solver import conjugate_gradient
 class TRPOAgent:
 
     def __init__(self, net):
-
         self.net = net
 
         self.gamma = 0.99
@@ -149,25 +148,62 @@ class TRPOAgent:
     # =========================
     def fisher_vector_product(self, states, old_probs, v):
 
-        eps = 1e-4
-        damping = 1e-1
+        damping = 1e-2
+        fisher_v = np.zeros_like(v)
 
-        params = self.net.get_params()
+        for s, old_p in zip(states, old_probs):
 
-        self.net.set_params(params + eps * v)
-        kl1 = self.mean_kl(states, old_probs)
+            probs, h, _, _ = self.net.forward(s)
 
-        self.net.set_params(params - eps * v)
-        kl2 = self.mean_kl(states, old_probs)
+            for a in range(len(probs)):
 
-        self.net.set_params(params)
+                # ===== 1️⃣ 计算 ∇ log π(a|s) =====
+                dlog = -probs
+                dlog[a] += 1  # one-hot trick
 
-        return ((kl1 - kl2) / (2 * eps)) * v + damping * v
+                # ===== 反向传播 =====
+                dw2 = np.outer(h, dlog)
+                db2 = dlog
+
+                dh = np.dot(self.net.w2, dlog)
+                dh = (1 - h ** 2) * dh
+
+                dw1 = np.outer(s, dh)
+                db1 = dh
+
+                g = np.concatenate([
+                    dw1.flatten(),
+                    db1.flatten(),
+                    dw2.flatten(),
+                    db2.flatten()
+                ])
+
+                # ===== 2️⃣ Fisher 累加 =====
+                fisher_v += probs[a] * np.dot(g, v) * g
+
+        fisher_v /= len(states)
+
+        return fisher_v + damping * v * v
+
+
+    def surrogate_loss(self, states, actions, old_probs, advs):
+
+        loss = 0
+
+        for s, a, old_p, adv in zip(states, actions, old_probs, advs):
+            new_p, _, _, _ = self.net.forward(s)
+            ratio = new_p[a] / (old_p[a] + 1e-8)
+            loss += ratio * adv
+
+        return loss / len(states)
+
 
     # =========================
     # Line Search
     # =========================
-    def line_search(self, states, old_probs, old_params, step):
+    def line_search(self, states, actions, old_probs, advs, old_params, step):
+
+        old_loss = self.surrogate_loss(states, actions, old_probs, advs)
 
         step_frac = 1.0
 
@@ -177,8 +213,9 @@ class TRPOAgent:
             self.net.set_params(new_params)
 
             kl = self.mean_kl(states, old_probs)
+            new_loss = self.surrogate_loss(states, actions, old_probs, advs)
 
-            if kl < self.delta:
+            if kl < self.delta and new_loss > old_loss:
                 return new_params
 
             step_frac *= 0.5
@@ -207,16 +244,17 @@ class TRPOAgent:
         shs = 0.5 * np.dot(step_dir, Avp(step_dir))
 
         if shs <= 0:
-                print("[WARN] bad curvature, using fallback")
-                step_dir = g
-                shs = np.dot(g, g)
+            print("[WARN] bad curvature, using fallback")
+            step_dir = g
+            shs = np.dot(g, g)
 
         step = step_dir / (np.sqrt(shs / self.delta) + 1e-8)
 
         old_params = self.net.get_params()
 
-        new_params = self.line_search(states, old_probs, old_params, step)
-
+        new_params = self.line_search(
+            states, actions, old_probs, advs, old_params, step
+        )
         self.net.set_params(new_params)
 
         # ⭐ 更新 value

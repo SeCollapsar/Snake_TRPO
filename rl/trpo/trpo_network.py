@@ -5,7 +5,7 @@ from config import Config
 
 class TRPONetwork:
 
-    def __init__(self, input_dim=300, hidden=128, output=4):
+    def __init__(self, input_dim=100, hidden=128, output=4):
 
         # ---------- Policy ----------
         self.w1 = np.random.randn(input_dim, hidden) * 0.01

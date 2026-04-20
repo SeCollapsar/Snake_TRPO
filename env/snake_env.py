@@ -132,17 +132,25 @@ class SnakeEnv:
         return self.get_state(), reward, False
 
     def get_state(self):
+        '''
+            get the map data
+                normal: 0
+                snake: 1
+                food: 2
+                head: 3
+            return
+        '''
 
-        grid = np.zeros((3, self.size, self.size))
+        grid = np.zeros((self.size, self.size))
 
         for x, y in self.snake:
-            grid[0, x, y] = 1
+            grid[x, y] = 1
 
         if self.food is not None:
             fx, fy = self.food
-            grid[1, fx, fy] = 1
+            grid[fx, fy] = 2
 
         hx, hy = self.snake[0]
-        grid[2, hx, hy] = 1
+        grid[hx, hy] = 3
 
         return grid.flatten()
