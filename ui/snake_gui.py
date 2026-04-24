@@ -25,6 +25,7 @@ class SnakeWindow(QWidget):
         try:
             ckpt = torch.load(Config.LATEST_MODEL, map_location="cpu")
             self.policy.load_state_dict(ckpt["model"])
+            print("[INFO] Model loaded")
         except:
             print("[WARN] No model found")
 
