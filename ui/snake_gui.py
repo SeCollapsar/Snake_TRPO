@@ -1,12 +1,13 @@
 import sys
 import numpy as np
+import torch
 
 from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6.QtGui import QPainter, QColor, QFont
 from PyQt6.QtCore import QTimer
 
 from env.snake_env import SnakeEnv
-from rl.trpo.trpo_network import TRPONetwork
+from rl.trpo.trpo_model import ActorCritic
 from config import Config
 
 
@@ -17,14 +18,23 @@ class SnakeWindow(QWidget):
 
         self.env = SnakeEnv()
 
-        self.policy = TRPONetwork()
-        self.policy.load()
+        # ⭐ 模型
+        input_dim = Config.GRID_SIZE * Config.GRID_SIZE
+        self.policy = ActorCritic(input_dim, Config.ACTIONS)
+
+        try:
+            ckpt = torch.load(Config.LATEST_MODEL, map_location="cpu")
+            self.policy.load_state_dict(ckpt["model"])
+        except:
+            print("[WARN] No model found")
+
+        self.policy.eval()
 
         self.size = Config.GRID_SIZE
         self.window_size = Config.WINDOW_SIZE
         self.cell = self.window_size // self.size
 
-        self.setWindowTitle("RL Snake (PyQt6)")
+        self.setWindowTitle("RL Snake (TRPO Torch)")
         self.setFixedSize(self.window_size, self.window_size)
 
         self.timer = QTimer()
@@ -35,7 +45,11 @@ class SnakeWindow(QWidget):
 
     def game_step(self):
 
-        probs, *_ = self.policy.forward(self.state)
+        state_tensor = torch.tensor(self.state, dtype=torch.float32)
+
+        with torch.no_grad():
+            logits, _ = self.policy(state_tensor)
+            probs = torch.softmax(logits, dim=-1).numpy()
 
         action = np.argmax(probs)
 
@@ -88,11 +102,14 @@ class SnakeWindow(QWidget):
         painter.setFont(QFont("Arial", 14))
 
         score = len(self.env.snake) - 2
-
         painter.drawText(10, 20, f"Score: {score}")
 
         # ---------- 概率 ----------
-        probs, *_ = self.policy.forward(self.state)
+        state_tensor = torch.tensor(self.state, dtype=torch.float32)
+
+        with torch.no_grad():
+            logits, _ = self.policy(state_tensor)
+            probs = torch.softmax(logits, dim=-1).numpy()
 
         painter.drawText(10, 40, f"Up:    {probs[0]:.2f}")
         painter.drawText(10, 60, f"Down:  {probs[1]:.2f}")

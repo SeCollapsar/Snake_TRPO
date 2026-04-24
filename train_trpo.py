@@ -1,60 +1,73 @@
+import torch
+import numpy as np
+import os
+
 from env.snake_env import SnakeEnv
-from rl.trpo.trpo_network import TRPONetwork
-from rl.trpo.trpo_agent import TRPOAgent
-from utils.logger_trpo import TRPOLogger
+from rl.trpo.trpo_model import ActorCritic
+from rl.trpo.trpo_trainer import TRPO
 from config import Config
+from utils.model_manager import ModelManager
+
 
 env = SnakeEnv()
-net = TRPONetwork()
-net.load()
 
-agent = TRPOAgent(net)
-logger = TRPOLogger()
+state_dim = Config.GRID_SIZE * Config.GRID_SIZE
+action_dim = Config.ACTIONS
 
-best_reward = -1e9
+model = ActorCritic(state_dim, action_dim)
+global_steps = 0
+
+if os.path.exists(Config.LATEST_MODEL):
+
+    # model.load_state_dict(torch.load(Config.LATEST_MODEL))
+    ckpt = torch.load(Config.LATEST_MODEL, map_location="cpu")
+    model.load_state_dict(ckpt["model"])
+    global_steps = ckpt.get("timesteps", 0)
+
+    print(f"[INFO] Loaded model | steps={global_steps}")
+else:
+    print("[INFO] Training from scratch")
+
+trainer = TRPO(model)
+manager = ModelManager()
 
 for ep in range(Config.EPISODES):
 
-    state = env.reset()
-
     states, actions, rewards, probs, dones = [], [], [], [], []
 
+    total_steps = 0
     total_reward = 0
 
-    while True:
+    while total_steps < Config.BATCH_SIZE:
 
-        action, prob = agent.sample_action(state)
+        state = env.reset()
 
-        next_state, reward, done = env.step(action)
+        while True:
 
-        states.append(state)
-        actions.append(action)
-        rewards.append(reward)
-        probs.append(prob)
-        dones.append(1 if done else 0)
+            s = torch.tensor(state, dtype=torch.float32)
 
-        state = next_state
-        total_reward += reward
+            action, prob = model.get_action(s)
 
-        if done:
-            break
+            next_state, reward, done = env.step(action)
 
-    # ⭐ TRPO更新
-    KL = agent.update(states, actions, probs, rewards, dones)
+            states.append(state)
+            actions.append(action)
+            rewards.append(reward)
+            probs.append(prob.numpy())
+            dones.append(1 if done else 0)
 
-    net.save()
+            state = next_state
 
-    if total_reward > best_reward:
-        best_reward = total_reward
+            total_reward += reward
+            total_steps += 1
 
-    logger.log(total_reward)
+            if done or total_steps >= Config.BATCH_SIZE:
+                break
 
-    if ep % 100 == 0:
-        print('============================================')
-        print(f"[TRPO] Episode {ep}, Reward: {total_reward}")
-        print(f"KL Divergence: {KL}")
-        # print('============================================')
-        
+    global_steps += 1
+    kl = trainer.update(states, actions, probs, rewards, dones, global_steps)
+    # ⭐ 保存模型
+    manager.save_latest(model, global_steps)
+    manager.update_best(model, total_reward)
 
-    if ep % 100 == 0:
-        logger.save()
+    print(f"[TRPO] Ep {ep} | Reward {total_reward:.2f} | KL {kl:.5f}")

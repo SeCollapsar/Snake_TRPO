@@ -104,7 +104,7 @@ class SnakeEnv:
 
         self.visited[new_head] += 1
 
-        repeat_penalty = Config.REWARD_REPEAT_PENALTY * np.log(self.visited[new_head] + 1)
+        repeat_penalty = Config.REWARD_REPEAT_PENALTY * (self.visited[new_head] + 1)
         reward += repeat_penalty
 
         # ---------- 吃到食物 ----------
